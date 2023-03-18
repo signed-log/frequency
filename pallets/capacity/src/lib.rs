@@ -78,8 +78,9 @@ mod tests;
 
 pub mod weights;
 
+use frame_support::traits::fungible::{Balanced, Inspect};
 type BalanceOf<T> =
-	<<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
+	<<T as Config>::FungibleToken as Inspect<<T as frame_system::Config>::AccountId>>::Balance;
 
 const STAKING_ID: LockIdentifier = *b"netstkng";
 #[frame_support::pallet]
@@ -99,7 +100,9 @@ pub mod pallet {
 		type WeightInfo: WeightInfo;
 
 		/// Function that allows a balance to be locked.
-		type Currency: LockableCurrency<Self::AccountId, Moment = Self::BlockNumber>;
+		type FungibleToken: LockableCurrency<Self::AccountId, Moment = Self::BlockNumber>
+			+ Balanced<Self::AccountId>
+			+ Inspect<Self::AccountId>;
 
 		/// Function that checks if an MSA is a valid target.
 		type TargetValidator: TargetValidator;
@@ -473,13 +476,13 @@ impl<T: Config> Pallet<T> {
 
 	/// Sets staking account details.
 	fn set_staking_account(staker: &T::AccountId, staking_account: &StakingAccountDetails<T>) {
-		T::Currency::set_lock(STAKING_ID, &staker, staking_account.total, WithdrawReasons::all());
+		T::FungibleToken::set_lock(STAKING_ID, &staker, staking_account.total, WithdrawReasons::all());
 		StakingAccountLedger::<T>::insert(staker, staking_account);
 	}
 
 	/// Deletes staking account details
 	fn delete_staking_account(staker: &T::AccountId) {
-		T::Currency::remove_lock(STAKING_ID, &staker);
+		T::FungibleToken::remove_lock(STAKING_ID, &staker);
 		StakingAccountLedger::<T>::remove(&staker);
 	}
 

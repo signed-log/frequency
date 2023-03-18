@@ -136,7 +136,7 @@ fn it_configures_staking_minimum_greater_than_or_equal_to_existential_deposit() 
 	new_test_ext().execute_with(|| {
 		let minimum_staking_balance_config: BalanceOf<Test> =
 			<Test as Config>::MinimumStakingAmount::get();
-		assert!(minimum_staking_balance_config >= <Test as Config>::Currency::minimum_balance())
+		assert!(minimum_staking_balance_config >= <Test as Config>::FungibleToken::minimum_balance())
 	});
 }
 

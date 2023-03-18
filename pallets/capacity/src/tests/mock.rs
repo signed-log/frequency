@@ -154,7 +154,7 @@ impl pallet_msa::Config for Test {
 impl pallet_capacity::Config for Test {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = ();
-	type Currency = pallet_balances::Pallet<Self>;
+	type FungibleToken = pallet_balances::Pallet<Self>;
 	type TargetValidator = Msa;
 	type MinimumStakingAmount = ConstU64<5>;
 	type MinimumTokenBalance = ConstU64<10>;

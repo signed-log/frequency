@@ -22,9 +22,9 @@ pub fn create_funded_account<T: Config>(
 ) -> T::AccountId {
 	let user = account(string, n, SEED);
 	whitelist_account!(user);
-	let balance = T::Currency::minimum_balance() * balance_factor.into();
-	let _ = T::Currency::make_free_balance_be(&user, balance);
-	assert_eq!(T::Currency::free_balance(&user), balance.into());
+	let balance = T::FungibleToken::minimum_balance() * balance_factor.into();
+	let _ = T::FungibleToken::make_free_balance_be(&user, balance);
+	assert_eq!(T::FungibleToken::free_balance(&user), balance.into());
 	user
 }
 

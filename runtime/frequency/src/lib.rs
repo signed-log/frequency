@@ -550,7 +550,7 @@ impl pallet_msa::Config for Runtime {
 impl pallet_capacity::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
 	type WeightInfo = pallet_capacity::weights::SubstrateWeight<Runtime>;
-	type Currency = Balances;
+	type FungibleToken = Balances;
 	type MinimumStakingAmount = CapacityMinimumStakingAmount;
 	type MinimumTokenBalance = CapacityMinimumTokenBalance;
 	type TargetValidator = Msa;
