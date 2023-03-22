@@ -94,7 +94,7 @@ describe("Capacity Replenishment Testing: ", function () {
 
   describe("Capacity is not replenished", function() {
     it("if out of capacity and last_replenished_at is <= current epoch", async function() {
-      let [stakeKeys, stakeProviderId] = await createAndStakeProvider("NoSend", 3n*1000n*1000n);
+      let [stakeKeys, _] = await createAndStakeProvider("NoSend", 3n*1000n*1000n);
       let payload = JSON.stringify({ changeType: 1,  fromId: 1, objectId: 2 })
       let call = ExtrinsicHelper.addOnChainMessage(stakeKeys, schemaId, payload);
 
@@ -111,6 +111,20 @@ describe("Capacity Replenishment Testing: ", function () {
 
       await assert.rejects(
         call.payWithCapacity(-1), {name: "RpcError", message: "1010: Invalid Transaction: Inability to pay some fees , e.g. account balance too low"});
+    });
+  });
+
+  describe("foo", function()  {
+    it("can do a sudo", async function() {
+      const [stakeKeys, stakeProviderId] = await createAndStakeProvider("TinyStake", 1n*1000n*1000n);
+      // new user/msa stakes to provider
+      const userKeys = createKeys("userKeys");
+      await fundKeypair(devAccounts[0].keys, userKeys, 2n*1000n*1000n);
+
+      const payload = JSON.stringify({ changeType: 1,  fromId: 1, objectId: 2 })
+      const call = ExtrinsicHelper.api.tx.messages.addOnchainMessage(null, schemaId, payload);
+      let [foo, events] = await ExtrinsicHelper.api.tx.sudo.sudoAs("//Alice", call).signAndSend(stakeKeys);
+      console.log({events});
     });
   });
 

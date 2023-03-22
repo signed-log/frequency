@@ -47,7 +47,7 @@
 use frame_support::{
 	dispatch::DispatchResult,
 	ensure,
-	traits::{Currency, Get, Hooks, LockIdentifier, LockableCurrency, WithdrawReasons},
+	traits::{Get, Hooks, LockIdentifier, WithdrawReasons},
 	weights::{constants::RocksDbWeight, Weight},
 };
 
@@ -89,7 +89,10 @@ pub mod pallet {
 
 	use frame_support::{pallet_prelude::*, Twox64Concat};
 	use frame_system::pallet_prelude::*;
+	// TODO: when we've updated to probably polkadot-v0.9.41 or greater
+	// use frame_system::fungible::freeze::Mutate;
 	use sp_runtime::traits::{AtLeast32BitUnsigned, MaybeDisplay};
+	use common_primitives::capacity::{LockableFungible, Freezable};
 
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
@@ -100,9 +103,11 @@ pub mod pallet {
 		type WeightInfo: WeightInfo;
 
 		/// Function that allows a balance to be locked.
-		type FungibleToken: LockableCurrency<Self::AccountId, Moment = Self::BlockNumber>
+		type FungibleToken: LockableFungible<Self::AccountId, Moment = Self::BlockNumber>
 			+ Balanced<Self::AccountId>
-			+ Inspect<Self::AccountId>;
+			+ Inspect<Self::AccountId>
+			+ Freezable<Self::AccountId>;
+			// + Mutate<Self::AccountId>;
 
 		/// Function that checks if an MSA is a valid target.
 		type TargetValidator: TargetValidator;
@@ -476,7 +481,12 @@ impl<T: Config> Pallet<T> {
 
 	/// Sets staking account details.
 	fn set_staking_account(staker: &T::AccountId, staking_account: &StakingAccountDetails<T>) {
-		T::FungibleToken::set_lock(STAKING_ID, &staker, staking_account.total, WithdrawReasons::all());
+		T::FungibleToken::set_lock(
+			STAKING_ID,
+			&staker,
+			staking_account.total,
+			WithdrawReasons::all(),
+		);
 		StakingAccountLedger::<T>::insert(staker, staking_account);
 	}
 

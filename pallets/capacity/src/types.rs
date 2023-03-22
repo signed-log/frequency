@@ -47,7 +47,7 @@ impl<T: Config> StakingAccountDetails<T> {
 		staker: &T::AccountId,
 		proposed_amount: BalanceOf<T>,
 	) -> BalanceOf<T> {
-		let account_balance = T::FungibleToken::free_balance(&staker);
+		let account_balance = T::FungibleToken::balance(&staker);
 		let available_staking_balance = account_balance.saturating_sub(self.total);
 		available_staking_balance
 			.saturating_sub(T::MinimumTokenBalance::get())
