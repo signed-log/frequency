@@ -1,6 +1,5 @@
-use frame_support::traits::{LockIdentifier, WithdrawReasons};
 use crate::msa::MessageSourceId;
-use frame_support::traits::tokens::Balance;
+use frame_support::traits::{tokens::Balance, LockIdentifier, WithdrawReasons};
 use sp_core::Get;
 use sp_runtime::DispatchError;
 

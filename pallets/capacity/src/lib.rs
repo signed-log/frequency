@@ -91,8 +91,8 @@ pub mod pallet {
 	use frame_system::pallet_prelude::*;
 	// TODO: when we've updated to probably polkadot-v0.9.41 or greater
 	// use frame_system::fungible::freeze::Mutate;
+	use common_primitives::capacity::{Freezable, LockableFungible};
 	use sp_runtime::traits::{AtLeast32BitUnsigned, MaybeDisplay};
-	use common_primitives::capacity::{LockableFungible, Freezable};
 
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
@@ -107,7 +107,7 @@ pub mod pallet {
 			+ Balanced<Self::AccountId>
 			+ Inspect<Self::AccountId>
 			+ Freezable<Self::AccountId>;
-			// + Mutate<Self::AccountId>;
+		// + Mutate<Self::AccountId>;
 
 		/// Function that checks if an MSA is a valid target.
 		type TargetValidator: TargetValidator;
