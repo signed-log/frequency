@@ -1,5 +1,6 @@
 use crate::msa::MessageSourceId;
-use frame_support::traits::{tokens::Balance, LockIdentifier, WithdrawReasons};
+use frame_support::traits::{LockIdentifier, tokens::Balance, WithdrawReasons};
+use frame_support::traits::fungible::Inspect;
 use sp_core::Get;
 use sp_runtime::DispatchError;
 
@@ -100,7 +101,7 @@ pub trait Freezable<AccountId> {
 	type Balance: Balance;
 
 	/// Create a new balance lock on account `who`.
-	fn set_lock(
+	fn set_freeze(
 		id: LockIdentifier,
 		who: &AccountId,
 		amount: Self::Balance,
@@ -108,5 +109,5 @@ pub trait Freezable<AccountId> {
 	);
 
 	/// Remove an existing lock.
-	fn remove_lock(id: LockIdentifier, who: &AccountId);
+	fn thaw(id: LockIdentifier, who: &AccountId);
 }

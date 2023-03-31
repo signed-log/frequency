@@ -57,7 +57,7 @@ use sp_runtime::{
 };
 
 pub use common_primitives::{
-	capacity::{Nontransferable, Replenishable, TargetValidator},
+	capacity::{Nontransferable, Replenishable, TargetValidator, Freezable, LockableFungible},
 	msa::MessageSourceId,
 	utils::wrap_binary_data,
 };
@@ -87,12 +87,14 @@ const STAKING_ID: LockIdentifier = *b"netstkng";
 pub mod pallet {
 	use super::*;
 
-	use frame_support::{pallet_prelude::*, Twox64Concat};
+	use frame_support::{
+		pallet_prelude::*,
+		traits::fungible::{Balanced, Inspect, Mutate},
+		Twox64Concat,
+	};
 	use frame_system::pallet_prelude::*;
-	// TODO: when we've updated to probably polkadot-v0.9.41 or greater
-	// use frame_system::fungible::freeze::Mutate;
-	use common_primitives::capacity::{Freezable, LockableFungible};
 	use sp_runtime::traits::{AtLeast32BitUnsigned, MaybeDisplay};
+	use common_primitives::capacity::{Freezable, LockableFungible};
 
 	#[pallet::config]
 	pub trait Config: frame_system::Config {
@@ -103,11 +105,11 @@ pub mod pallet {
 		type WeightInfo: WeightInfo;
 
 		/// Function that allows a balance to be locked.
-		type FungibleToken: LockableFungible<Self::AccountId, Moment = Self::BlockNumber>
-			+ Balanced<Self::AccountId>
+		type FungibleToken: Balanced<Self::AccountId>
 			+ Inspect<Self::AccountId>
+			+ Mutate<Self::AccountId>
+			+ LockableFungible<Self::AccountId>
 			+ Freezable<Self::AccountId>;
-		// + Mutate<Self::AccountId>;
 
 		/// Function that checks if an MSA is a valid target.
 		type TargetValidator: TargetValidator;
@@ -481,9 +483,10 @@ impl<T: Config> Pallet<T> {
 
 	/// Sets staking account details.
 	fn set_staking_account(staker: &T::AccountId, staking_account: &StakingAccountDetails<T>) {
-		T::FungibleToken::set_lock(
+		T::FungibleToken::set_freeze(
+			// via Mutate
 			STAKING_ID,
-			&staker,
+			staker,
 			staking_account.total,
 			WithdrawReasons::all(),
 		);

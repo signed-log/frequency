@@ -2,7 +2,10 @@ use super::*;
 use crate::Pallet as Capacity;
 
 use frame_benchmarking::{account, benchmarks, whitelist_account, Vec};
-use frame_support::{assert_ok, traits::Currency};
+use frame_support::{
+	assert_ok,
+	traits::{fungible::Mutate, fungible::Inspect},
+};
 use frame_system::RawOrigin;
 
 const SEED: u32 = 0;
@@ -15,16 +18,17 @@ pub fn register_provider<T: Config>(target_id: MessageSourceId, name: &'static s
 	let name = Vec::from(name).try_into().expect("error");
 	assert_ok!(T::BenchmarkHelper::create(target_id, name));
 }
+
 pub fn create_funded_account<T: Config>(
 	string: &'static str,
 	n: u32,
 	balance_factor: u32,
 ) -> T::AccountId {
-	let user = account(string, n, SEED);
+	let user: T::AccountId = account(string, n, SEED);
 	whitelist_account!(user);
-	let balance = T::FungibleToken::minimum_balance() * balance_factor.into();
-	let _ = T::FungibleToken::make_free_balance_be(&user, balance);
-	assert_eq!(T::FungibleToken::free_balance(&user), balance.into());
+	let balance: BalanceOf<T> = T::FungibleToken::minimum_balance() * balance_factor.into();
+	assert_ok!(T::FungibleToken::mint_into(&user, balance)); // via Mutate
+	assert_eq!(T::FungibleToken::balance(&user), balance.into()); // via Inspect
 	user
 }
 

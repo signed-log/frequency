@@ -83,6 +83,7 @@ pub use common_runtime::{
 	weights::{block_weights::BlockExecutionWeight, extrinsic_weights::ExtrinsicBaseWeight},
 };
 use frame_support::traits::{Contains, OnRuntimeUpgrade};
+use frame_support::traits::fungible::Inspect;
 
 #[cfg(feature = "try-runtime")]
 use frame_support::traits::TryStateSelect;
