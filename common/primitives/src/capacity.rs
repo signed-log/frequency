@@ -1,5 +1,9 @@
 use crate::msa::MessageSourceId;
-use frame_support::traits::{fungible::Inspect, tokens::Balance, LockIdentifier, WithdrawReasons};
+use codec::Output;
+use frame_support::traits::{
+	fungible::Inspect, tokens::Balance, IsType, LockIdentifier, WithdrawReasons,
+};
+use scale_info::Type;
 use sp_core::Get;
 use sp_runtime::DispatchError;
 
@@ -97,7 +101,7 @@ pub trait LockableFungible<AccountId> {
 /// and use that.
 pub trait Freezable<AccountId> {
 	/// Scalar type for representing balance of an account.
-	type Balance: Balance;
+	type Balance: Balance + IsType<Inspect<AccountId>::Balance>;
 
 	/// Create a new balance lock on account `who`.
 	fn set_freeze(
