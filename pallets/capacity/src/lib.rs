@@ -57,7 +57,7 @@ use sp_runtime::{
 };
 
 pub use common_primitives::{
-	capacity::{Nontransferable, Replenishable, TargetValidator, Freezable, LockableFungible},
+	capacity::{Freezable, LockableFungible, Nontransferable, Replenishable, TargetValidator},
 	msa::MessageSourceId,
 	utils::wrap_binary_data,
 };
@@ -87,6 +87,7 @@ const STAKING_ID: LockIdentifier = *b"netstkng";
 pub mod pallet {
 	use super::*;
 
+	use common_primitives::capacity::{Freezable, LockableFungible};
 	use frame_support::{
 		pallet_prelude::*,
 		traits::fungible::{Balanced, Inspect, Mutate},
@@ -94,7 +95,6 @@ pub mod pallet {
 	};
 	use frame_system::pallet_prelude::*;
 	use sp_runtime::traits::{AtLeast32BitUnsigned, MaybeDisplay};
-	use common_primitives::capacity::{Freezable, LockableFungible};
 
 	#[pallet::config]
 	pub trait Config: frame_system::Config {

@@ -4,7 +4,7 @@ use crate::Pallet as Capacity;
 use frame_benchmarking::{account, benchmarks, whitelist_account, Vec};
 use frame_support::{
 	assert_ok,
-	traits::{fungible::Mutate, fungible::Inspect},
+	traits::fungible::{Inspect, Mutate},
 };
 use frame_system::RawOrigin;
 

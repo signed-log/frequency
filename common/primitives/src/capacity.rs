@@ -1,6 +1,5 @@
 use crate::msa::MessageSourceId;
-use frame_support::traits::{LockIdentifier, tokens::Balance, WithdrawReasons};
-use frame_support::traits::fungible::Inspect;
+use frame_support::traits::{fungible::Inspect, tokens::Balance, LockIdentifier, WithdrawReasons};
 use sp_core::Get;
 use sp_runtime::DispatchError;
 
