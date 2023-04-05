@@ -579,7 +579,7 @@ impl<T: Config> Pallet<T> {
 			CurrentEpochInfo::<T>::set(EpochInfo { epoch_start: current_block });
 			T::WeightInfo::on_initialize()
 				.saturating_add(RocksDbWeight::get().reads(1))
-				.saturating_add(RocksDbWeight::get().writes(1))
+				.saturating_add(RocksDbWeight::get().writes(2))
 		} else {
 			// 1 for get_current_epoch_info, 1 for get_epoch_length
 			RocksDbWeight::get().reads(2u64)
