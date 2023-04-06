@@ -194,7 +194,10 @@ pub mod pallet {
 			.saturating_add(
 				RocksDbWeight::get().writes(1)
 			);
-		(< T as Config >::WeightInfo::pay_with_capacity().saturating_add(capacity_overhead), dispatch_info.class)
+		(< T as Config >::WeightInfo::pay_with_capacity()
+				.saturating_add(capacity_overhead)
+				.saturating_add(dispatch_info.weight),
+			dispatch_info.class)
 		})]
 		pub fn pay_with_capacity(
 			origin: OriginFor<T>,

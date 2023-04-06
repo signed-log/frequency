@@ -1,6 +1,9 @@
 use super::*;
 use crate::{self as pallet_frequency_tx_payment, mock::*, ChargeFrqTransactionPayment};
-use frame_support::{assert_noop, assert_ok, weights::Weight};
+use frame_support::{
+	assert_noop, assert_ok,
+	weights::{constants::RocksDbWeight, Weight},
+};
 use frame_system::RawOrigin;
 use pallet_capacity::{CapacityDetails, CurrentEpoch, Nontransferable};
 
@@ -252,15 +255,19 @@ fn pay_with_capacity_returns_weight_of_child_call() {
 	let create_msa_call = Box::new(RuntimeCall::Msa(MsaCall::<Test>::create {}));
 	let create_msa_dispatch_info = create_msa_call.get_dispatch_info();
 
+	let minimum_extra_weight = RocksDbWeight::get()
+		.reads(2)
+		.saturating_add(RocksDbWeight::get().writes(1))
+		.saturating_add(create_msa_dispatch_info.weight);
+
 	let pay_with_capacity_call = Box::new(RuntimeCall::FrequencyTxPayment(
 		FrequencyTxPaymentCall::<Test>::pay_with_capacity { call: create_msa_call },
 	));
 	let pay_with_capacity_dispatch_info = pay_with_capacity_call.get_dispatch_info();
-
 	assert!(pay_with_capacity_dispatch_info
 		.weight
 		.ref_time()
-		.gt(&create_msa_dispatch_info.weight.ref_time()));
+		.gt(&minimum_extra_weight.ref_time()));
 }
 
 #[test]
