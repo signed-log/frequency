@@ -8,11 +8,12 @@ use sc_client_api::Backend;
 use std::{sync::Arc, time::Duration};
 
 use cumulus_client_cli::CollatorOptions;
-use frequency_runtime::RuntimeApi;
+use frequency_runtime::apis::RuntimeApi;
 
 // RPC
 use common_primitives::node::{AccountId, Balance, Block, Hash, Index as Nonce};
 use jsonrpsee::RpcModule;
+use substrate_prometheus_endpoint::Registry;
 
 // Cumulus Imports
 use cumulus_client_collator::service::CollatorService;
@@ -48,55 +49,23 @@ use sc_telemetry::{Telemetry, TelemetryHandle, TelemetryWorker, TelemetryWorkerH
 use sc_transaction_pool_api::OffchainTransactionPoolFactory;
 use sp_blockchain::HeaderBackend;
 use sp_keystore::KeystorePtr;
-use substrate_prometheus_endpoint::Registry;
 
 type FullBackend = TFullBackend<Block>;
 
 type MaybeFullSelectChain = Option<LongestChain<FullBackend, Block>>;
 
-/// Native executor instance for frequency.
-pub mod frequency_executor {
-	pub use frequency_runtime;
-	use log::debug;
-	use sc_executor::{
-		sp_wasm_interface,
-		sp_wasm_interface::{Function, HostFunctionRegistry, HostFunctions},
-	};
+#[cfg(not(feature = "runtime-benchmarks"))]
+type HostFunctions = cumulus_client_service::ParachainHostFunctions;
 
-	/// Native executor instance for frequency mainnet.
-	pub struct FrequencyExecutorDispatch;
+#[cfg(feature = "runtime-benchmarks")]
+type HostFunctions = (
+	cumulus_client_service::ParachainHostFunctions,
+	frame_benchmarking::benchmarking::HostFunctions,
+);
 
-	impl sc_executor::NativeExecutionDispatch for FrequencyExecutorDispatch {
-		#[cfg(feature = "runtime-benchmarks")]
-		type ExtendHostFunctions = frame_benchmarking::benchmarking::HostFunctions;
+pub use frequency_runtime;
 
-		#[cfg(not(feature = "runtime-benchmarks"))]
-		type ExtendHostFunctions = ();
-
-		fn dispatch(method: &str, data: &[u8]) -> Option<Vec<u8>> {
-			frequency_runtime::api::dispatch(method, data)
-		}
-
-		fn native_version() -> sc_executor::NativeVersion {
-			frequency_runtime::native_version()
-		}
-	}
-
-	#[cfg(feature = "try-runtime")]
-	impl HostFunctions for FrequencyExecutorDispatch {
-		fn host_functions() -> Vec<&'static dyn Function> {
-			Vec::new()
-		}
-
-		fn register_static<T: HostFunctionRegistry>(_registry: &mut T) -> Result<(), T::Error> {
-			Ok(())
-		}
-	}
-}
-
-pub use frequency_executor::*;
-
-type ParachainExecutor = NativeElseWasmExecutor<FrequencyExecutorDispatch>;
+type ParachainExecutor = WasmExecutor<HostFunctions>;
 
 /// Frequency parachain
 pub type ParachainClient = TFullClient<Block, RuntimeApi, ParachainExecutor>;
@@ -139,7 +108,7 @@ pub fn new_partial(
 		.default_heap_pages
 		.map_or(DEFAULT_HEAP_ALLOC_STRATEGY, |h| HeapAllocStrategy::Static { extra_pages: h as _ });
 
-	let wasm = WasmExecutor::builder()
+	let executor = ParachainExecutor::builder()
 		.with_execution_method(config.wasm_method)
 		.with_onchain_heap_alloc_strategy(heap_pages)
 		.with_offchain_heap_alloc_strategy(heap_pages)
@@ -147,13 +116,12 @@ pub fn new_partial(
 		.with_runtime_cache_size(config.runtime_cache_size)
 		.build();
 
-	let executor = ParachainExecutor::new_with_wasm_executor(wasm);
-
 	let (client, backend, keystore_container, task_manager) =
-		sc_service::new_full_parts::<Block, RuntimeApi, _>(
+		sc_service::new_full_parts_record_import::<Block, RuntimeApi, _>(
 			config,
 			telemetry.as_ref().map(|(_, telemetry)| telemetry.handle()),
 			executor,
+			true,
 		)?;
 	let client = Arc::new(client);
 
@@ -463,8 +431,6 @@ fn start_consensus(
 	// NOTE: because we use Aura here explicitly, we can use `CollatorSybilResistance::Resistant`
 	// when starting the network.
 
-	let slot_duration = cumulus_client_consensus_aura::slot_duration(&*client)?;
-
 	let proposer_factory = sc_basic_authorship::ProposerFactory::with_proof_recording(
 		task_manager.spawn_handle(),
 		client.clone(),
@@ -500,11 +466,11 @@ fn start_consensus(
 		collator_key,
 		para_id,
 		overseer_handle,
-		slot_duration,
 		relay_chain_slot_duration,
 		proposer,
 		collator_service,
 		authoring_duration: Duration::from_millis(1500),
+		reinitialize: false,
 	};
 
 	let fut =

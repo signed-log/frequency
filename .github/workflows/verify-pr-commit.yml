@@ -27,7 +27,7 @@ jobs:
       - name: Check Out Repo
         uses: actions/checkout@v4
       - name: Check for Changed Files
-        uses: dorny/paths-filter@ebc4d7e9ebcb0b1eb21480bb8f43113e996ac77a
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36
         id: filter
         with:
           filters: |
@@ -193,13 +193,23 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     name: Verify Rust Code Format
     runs-on: ubuntu-22.04
-    container: ghcr.io/frequency-chain/frequency/ci-base-image:1.3.1
+    container:
+      image: ghcr.io/frequency-chain/frequency/ci-base-image:1.3.1
     steps:
-      - name: Check Out Repo
+      - name: Check Out Repository
         uses: actions/checkout@v4
-      - name: Check
+      - name: Install Nightly Toolchain
         run: |
-          cargo +nightly-2024-03-01 fmt --check
+          rustup toolchain install nightly-2024-08-01
+      - name: Install Rust Target
+        run: |
+          rustup target add wasm32-unknown-unknown --toolchain nightly-2024-08-01
+      - name: Install Rust Source Component
+        run: |
+          rustup component add rust-src --toolchain nightly-2024-08-01
+      - name: Verify Rust Code Formatting
+        run: |
+          cargo +nightly-2024-08-01 fmt --check
 
   lint-rust-code:
     needs: changes
@@ -226,10 +236,15 @@ jobs:
     steps:
       - name: Check Out Repo
         uses: actions/checkout@v4
+      - name: Install Nightly Toolchain
+        run: rustup toolchain install nightly-2024-08-01
+      - name: Add Required Components
+        run: |
+          rustup target add wasm32-unknown-unknown --toolchain nightly-2024-08-01
+          rustup component add rust-src --toolchain nightly-2024-08-01
       - name: Build Docs
         run: |
-          rustup target add wasm32-unknown-unknown --toolchain nightly-2024-03-01
-          RUSTDOCFLAGS="--enable-index-page --check -Zunstable-options" cargo +nightly-2024-03-01 doc --no-deps --features frequency
+          RUSTDOCFLAGS="--enable-index-page --check -Zunstable-options" cargo +nightly-2024-08-01 doc --no-deps --features frequency
 
   verify-rust-packages-and-deps:
     needs: changes
@@ -282,7 +297,7 @@ jobs:
     strategy:
       matrix:
         # Should match `verify-build-runtimes`
-        network: [dev, rococo, paseo, mainnet]
+        network: [dev, paseo, mainnet]
     runs-on: ubuntu-22.04
     steps:
       - run: echo "Just a dummy matrix to satisfy GitHub required checks that were skipped"
@@ -297,7 +312,7 @@ jobs:
         # Remember, runtimes are separate for each relay chain
         # We do not release frequency-*-local runtimes however
         # Also should match `verify-build-runtimes-dummy`
-        network: [dev, rococo, paseo, mainnet]
+        network: [dev, paseo, mainnet]
         include:
           - network: dev
             chain: dev
@@ -306,14 +321,6 @@ jobs:
             runtime-dir: runtime/frequency
             built-wasm-file-name-prefix: frequency_runtime
             features: frequency-no-relay
-            wasm-core-version: frequency-testnet
-          - network: rococo
-            chain: frequency-rococo
-            build-profile: release
-            package: frequency-runtime
-            runtime-dir: runtime/frequency
-            built-wasm-file-name-prefix: frequency_runtime
-            features: frequency-testnet
             wasm-core-version: frequency-testnet
           - network: paseo
             chain: frequency-paseo
@@ -483,14 +490,6 @@ jobs:
           platforms: "amd64"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Build collator image in instant seal mode
-        env:
-          IMAGE_NAME: instant-seal-node
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          file: ./docker/${{env.IMAGE_NAME}}.dockerfile
       - name: Build collator standalone
         env:
           IMAGE_NAME: standalone-node
@@ -502,7 +501,7 @@ jobs:
       - name: Build collator image for local relay chain
         env:
           IMAGE_NAME: collator-node-local
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: false
@@ -706,7 +705,6 @@ jobs:
       - name: Set Env Vars
         run: |
           echo "EXPECTED_GENESIS_STATE_PASEO=0x000000000000000000000000000000000000000000000000000000000000000000805f6ddb6879aa31316a38c149e52ffe4e9f2a193e966ddcf3b6a2cb5846e96903170a2e7597b7b7e3d84c05391d139a62b157e78786d8c082f29dcf4c11131400" >> $GITHUB_ENV
-          echo "EXPECTED_GENESIS_STATE_ROCOCO=0x000000000000000000000000000000000000000000000000000000000000000000e3495742b019f5ad49dff7de4040bc965b75eaf46769c24db1027d4ff86fc92703170a2e7597b7b7e3d84c05391d139a62b157e78786d8c082f29dcf4c11131400" >> $GITHUB_ENV
           echo "EXPECTED_GENESIS_STATE_MAINNET=0x000000000000000000000000000000000000000000000000000000000000000000393a2a0f7778716d006206c5a4787cbf2ea3b26a67379b7a38ee54519d7fd4be03170a2e7597b7b7e3d84c05391d139a62b157e78786d8c082f29dcf4c11131400" >> $GITHUB_ENV
           echo "BIN_FILENAME_TESTNET=frequency.testnet.frequency-testnet.pr" >> $GITHUB_ENV
           echo "BIN_FILENAME_MAINNET=frequency.mainnet.frequency.pr" >> $GITHUB_ENV
@@ -727,15 +725,6 @@ jobs:
         run: |
           chmod 755 $BIN_FILENAME_TESTNET
           chmod 755 $BIN_FILENAME_MAINNET
-      - name: Test Frequency Rococo Genesis State
-        working-directory: ${{env.BIN_DIR}}
-        run: |
-          expected_genesis_state=${{env.EXPECTED_GENESIS_STATE_ROCOCO}}
-          echo "Expected genesis state: $expected_genesis_state"
-          actual_genesis_state=$(./${{env.BIN_FILENAME_TESTNET}} export-genesis-state --chain=frequency-rococo)
-          echo "Actual genesis state: $actual_genesis_state"
-          [ $actual_genesis_state = $expected_genesis_state ] || \
-            (echo "ERROR: The actual genesis state does not match the expected" && exit 1)
       - name: Test Frequency Paseo Genesis State
         working-directory: ${{env.BIN_DIR}}
         run: |

@@ -1,17 +1,22 @@
+{% if env.IS_FULL_RELEASE == 'true' %}
 This release contains the changes from `{{env.PREVIOUS_RELEASE_TAG}}` to `{{env.NEW_RELEASE_TAG}}`.
+{% else %}
+This release candidate contains the changes from `{{env.PREVIOUS_RELEASE_TAG}}` to `{{env.NEW_RELEASE_TAG}}`.
+{% endif %}
 
 Full changelog: https://github.com/frequency-chain/frequency/compare/{{env.PREVIOUS_RELEASE_TAG}}...{{env.NEW_RELEASE_TAG}}
 
 ## Versions
 - Rust Toolchain: `{{env.RUST_TOOLCHAIN}}`
-- Substrate/Polkadot: `v{{env.POLKADOT_VERSION}}`
+- Polkadot-SDK: `v{{env.POLKADOT_VERSION}}`
 
+{% if env.IS_FULL_RELEASE == 'true' %}
 ## Deployed
 
 - Frequency-Paseo Testnet: [TBD]()
-- Frequency-Rococo Testnet: [TBD]()
 - Frequency Mainnet: [TBD]()
 
+{% endif %}
 ## What's Changed
 
 {% set changelog = env.CHANGELOG | split(pat='|n|') -%}
@@ -41,12 +46,11 @@ The information about the runtimes included in this release can be found below.
 {% endfor -%}
 ```
 
+### Metadata Change Summary vs Mainnet
 
-### Frequency Rococo Testnet
-
-{% set runtime = env.RUNTIME_ROCOCO_INFO | split(pat='|') -%}
+{% set summary = env.METADATA_CHANGE_SUMMARY | split(pat='|') -%}
 ```
-{% for line in runtime -%}
+{% for line in summary -%}
 	{{ line | safe }}
 {% endfor -%}
 ```

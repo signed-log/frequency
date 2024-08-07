@@ -7,12 +7,9 @@ all: build
 clean:
 	cargo clean
 
-.PHONY: start, start-relay, start-frequency, start-frequency-docker, start-manual, start-interval, start-interval-short, start-with-offchain, start-frequency-with-offchain, start-manual-with-offchain, start-interval-with-offchain
+.PHONY: start start-frequency start-frequency-docker start-manual start-interval start-interval-short start-with-offchain start-frequency-with-offchain start-manual-with-offchain start-interval-with-offchain
 start:
 	./scripts/init.sh start-frequency-instant
-
-start-relay:
-	./scripts/init.sh start-relay-chain
 
 start-paseo-relay:
 	./scripts/init.sh start-paseo-relay-chain
@@ -44,7 +41,7 @@ start-manual-with-offchain:
 start-interval-with-offchain:
 	./scripts/init.sh start-frequency-interval with-offchain
 
-.PHONY: stop, stop-relay, stop-frequency-docker
+.PHONY: stop stop-relay stop-frequency-docker
 stop-relay:
 	./scripts/init.sh stop-relay-chain
 
@@ -75,20 +72,20 @@ onboard:
 offboard:
 	./scripts/init.sh offboard-frequency-paseo-local
 
-.PHONY: specs-paseo-2000, specs-paseo-local
-specs-paseo-2000:
+.PHONY: specs-testnet-2000 specs-paseo-local
+specs-testnet-2000:
 	./scripts/generate_specs.sh 2000 paseo-2000 release
 
-specs-rococo-local:
+specs-paseo-local:
 	./scripts/generate_relay_specs.sh
 
 .PHONY: format
 format:
-	cargo +nightly-2024-03-01 fmt
+	cargo +nightly-2024-08-01 fmt
 
-.PHONY: lint, lint-audit
+.PHONY: lint lint-audit
 lint:
-	cargo +nightly-2024-03-01 fmt --check
+	cargo +nightly-2024-08-01 fmt --check
 	SKIP_WASM_BUILD=1 env -u RUSTFLAGS cargo clippy --features runtime-benchmarks,frequency-lint-check -- -D warnings
 	RUSTC_BOOTSTRAP=1 RUSTDOCFLAGS="--enable-index-page --check -Zunstable-options" cargo doc --no-deps --features frequency
 
@@ -101,9 +98,9 @@ format-lint: format lint
 .PHONY: ci-local
 ci-local: check lint lint-audit test js e2e-tests
 
-.PHONY: upgrade-local, upgrade-no-relay
+.PHONY: upgrade-local upgrade-no-relay
 upgrade-local:
-	./scripts/init.sh upgrade-frequency-rococo-local
+	./scripts/init.sh upgrade-frequency-paseo-local
 
 upgrade-no-relay:
 	./scripts/init.sh upgrade-frequency-no-relay
@@ -206,7 +203,7 @@ docs:
 docker-prune:
 	./scripts/prune_all.sh
 
-.PHONY: check, check-no-relay, check-local, check-rococo, check-mainnet
+.PHONY: check check-no-relay check-local check-testnet check-mainnet
 check:
 	SKIP_WASM_BUILD= cargo check --features runtime-benchmarks,frequency-lint-check
 
@@ -214,9 +211,9 @@ check-no-relay:
 	SKIP_WASM_BUILD= cargo check --features frequency-no-relay
 
 check-local:
-	SKIP_WASM_BUILD= cargo check --features frequency-rococo-local
+	SKIP_WASM_BUILD= cargo check --features frequency-paseo-local
 
-check-rococo:
+check-testnet:
 	SKIP_WASM_BUILD= cargo check --features frequency-testnet
 
 check-mainnet:
@@ -226,7 +223,7 @@ check-mainnet:
 js:
 	./scripts/generate_js_definitions.sh
 
-.PHONY: build, build-benchmarks, build-no-relay, build-local, build-rococo, build-mainnet, build-rococo-release, build-mainnet-release
+.PHONY: build build-benchmarks build-no-relay build-local build-testnet build-mainnet build-testnet-release build-mainnet-release
 build:
 	cargo build --features frequency-no-relay
 
@@ -251,7 +248,7 @@ build-testnet-release:
 build-mainnet-release:
 	cargo build --locked --features  frequency --release
 
-.PHONY: test, e2e-tests, e2e-tests-serial, e2e-tests-only, e2e-tests-load, e2e-tests-load-only, e2e-tests-rococo, e2e-tests-rococo-local, e2e-tests-testnet-paseo, e2e-tests-paseo-local
+.PHONY: test e2e-tests e2e-tests-serial e2e-tests-only e2e-tests-load e2e-tests-load-only e2e-tests-testnet-paseo e2e-tests-paseo-local
 test:
 	cargo test --workspace --features runtime-benchmarks,frequency-lint-check
 
@@ -270,12 +267,6 @@ e2e-tests-load:
 e2e-tests-load-only:
 	./scripts/run_e2e_tests.sh -s load
 
-e2e-tests-rococo:
-	./scripts/run_e2e_tests.sh -c rococo_testnet
-
-e2e-tests-rococo-local:
-	./scripts/run_e2e_tests.sh -c rococo_local
-
 e2e-tests-testnet-paseo:
 	./scripts/run_e2e_tests.sh -c paseo_testnet
 
@@ -284,7 +275,8 @@ e2e-tests-paseo-local:
 
 check-try-runtime-installed:
 	@which try-runtime > /dev/null || (echo "try-runtime is not installed. Please install it" && exit 1)
-.PHONY: try-runtime-create-snapshot-mainnet, try-runtime-upgrade-mainnet, try-runtime-use-snapshot-mainnet, try-runtime-create-snapshot-paseo-testnet, try-runtime-use-snapshot-paseo-testnet, try-runtime-upgrade-paseo-testnet
+
+.PHONY: try-runtime-create-snapshot-mainnet try-runtime-upgrade-mainnet try-runtime-use-snapshot-mainnet try-runtime-create-snapshot-paseo-testnet try-runtime-use-snapshot-paseo-testnet try-runtime-upgrade-paseo-testnet
 
 try-runtime-create-snapshot-paseo-testnet: check-try-runtime-installed
 	try-runtime create-snapshot --uri wss://0.rpc.testnet.amplica.io:443 testnet-paseo-all-pallets.state
@@ -314,7 +306,7 @@ try-runtime-check-migrations-paseo-testnet: check-try-runtime-installed
 	try-runtime --runtime ./target/release/wbuild/frequency-runtime/frequency_runtime.wasm on-runtime-upgrade --checks="pre-and-post" --disable-spec-version-check --no-weight-warnings live --uri wss://0.rpc.testnet.amplica.io:443
 # Pull the Polkadot version from the polkadot-cli package in the Cargo.lock file.
 # This will break if the lock file format changes
-POLKADOT_VERSION=$(shell awk -F "=" '/name = "polkadot-cli"/,/version = ".*"/{ print $2 }' Cargo.lock | tail -n 1 | cut -d " " -f 3 | tr -d \")
+POLKADOT_VERSION=$(shell grep -o 'release-polkadot-v[0-9.]*' Cargo.toml | sed 's/release-polkadot-v//' | head -n 1)
 
 .PHONY: version
 version:
@@ -353,3 +345,9 @@ endif
 .PHONY: version-reset
 version-reset:
 	find ./ -type f -name 'Cargo.toml' -exec sed -i '' 's/^version = \".*+polkadot.*\"/version = \"0.0.0\"/g' {} \;
+
+.PHONY: genesis-schemas
+genesis-schemas:
+	cd tools/genesis-data && \
+	npm i && \
+	npm run --silent schemas > ../../resources/genesis-schemas.json

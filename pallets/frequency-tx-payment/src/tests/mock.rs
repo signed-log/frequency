@@ -20,6 +20,8 @@ use frame_support::{
 	weights::WeightToFee as WeightToFeeTrait,
 };
 
+use pallet_capacity::CapacityLedger;
+
 pub use common_runtime::constants::{MAXIMUM_BLOCK_WEIGHT, NORMAL_DISPATCH_RATIO};
 
 use frame_support::weights::Weight;
@@ -80,6 +82,11 @@ impl frame_system::Config for Test {
 	type SS58Prefix = ConstU16<42>;
 	type OnSetCode = ();
 	type MaxConsumers = frame_support::traits::ConstU32<16>;
+	type SingleBlockMigrations = ();
+	type MultiBlockMigrator = ();
+	type PreInherents = ();
+	type PostInherents = ();
+	type PostTransactions = ();
 }
 
 impl pallet_balances::Config for Test {
@@ -95,7 +102,6 @@ impl pallet_balances::Config for Test {
 	type FreezeIdentifier = RuntimeFreezeReason;
 	type RuntimeFreezeReason = ();
 	type MaxFreezes = ConstU32<1>;
-	type MaxHolds = ConstU32<0>;
 	type RuntimeHoldReason = ();
 }
 
@@ -357,7 +363,7 @@ pub fn create_msa_account(
 }
 
 fn create_capacity_for(target: MessageSourceId, amount: u64) {
-	let mut capacity_details = Capacity::get_capacity_for(target).unwrap_or_default();
+	let mut capacity_details = CapacityLedger::<Test>::get(target).unwrap_or_default();
 	let capacity: u64 = amount / (TEST_TOKEN_PER_CAPACITY as u64);
 	capacity_details.deposit(&amount, &capacity).unwrap();
 	Capacity::set_capacity_for(target, capacity_details);

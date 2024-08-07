@@ -14,12 +14,14 @@ use common_primitives::{
 use frame_support::{
 	assert_noop, assert_ok, dispatch::RawOrigin, traits::ChangeMembers, weights::Weight, BoundedVec,
 };
+use pallet_collective::ProposalOf;
 use parity_scale_codec::Encode;
 use serial_test::serial;
-use sp_runtime::DispatchError::BadOrigin;
+use sp_runtime::{BuildStorage, DispatchError::BadOrigin};
 
 use crate::{
-	Error, Event as AnnouncementEvent, SchemaDescriptor, SchemaName, SchemaNamePayload,
+	CurrentSchemaIdentifierMaximum, Error, Event as AnnouncementEvent,
+	GovernanceSchemaModelMaxBytes, SchemaDescriptor, SchemaName, SchemaNamePayload,
 	SchemaNamespace, SchemaVersionId, MAX_NUMBER_OF_VERSIONS,
 };
 
@@ -30,7 +32,7 @@ fn set_max_schema_size_works_if_root() {
 	new_test_ext().execute_with(|| {
 		let new_size: u32 = 42;
 		assert_ok!(SchemasPallet::set_max_schema_model_bytes(RawOrigin::Root.into(), new_size));
-		let new_schema_size = SchemasPallet::get_schema_model_max_bytes();
+		let new_schema_size = GovernanceSchemaModelMaxBytes::<Test>::get();
 		assert_eq!(new_size, new_schema_size);
 	})
 }
@@ -794,7 +796,7 @@ fn propose_to_create_schema_v2_happy_path() {
 
 		let proposal_index = proposed_events[0].0;
 		let proposal_hash = proposed_events[0].1;
-		let proposal = Council::proposal_of(proposal_hash).unwrap();
+		let proposal = ProposalOf::<Test, CouncilCollective>::get(proposal_hash).unwrap();
 		let proposal_len: u32 = proposal.encoded_size() as u32;
 
 		// Set up the council members
@@ -943,7 +945,7 @@ fn propose_to_create_schema_name_happy_path() {
 
 		let proposal_index = proposed_events[0].0;
 		let proposal_hash = proposed_events[0].1;
-		let proposal = Council::proposal_of(proposal_hash).unwrap();
+		let proposal = ProposalOf::<Test, CouncilCollective>::get(proposal_hash).unwrap();
 		let proposal_len: u32 = proposal.encoded_size() as u32;
 
 		// Set up the council members
@@ -1049,4 +1051,32 @@ fn propose_to_create_schema_name_happy_path() {
 			}])
 		);
 	})
+}
+
+#[test]
+fn genesis_config_build_genesis_schemas() {
+	let mut t = frame_system::GenesisConfig::<Test>::default().build_storage().unwrap();
+	crate::GenesisConfig::<Test> {
+		initial_schemas: serde_json::from_slice(include_bytes!(
+			"../../../../resources/genesis-schemas.json"
+		))
+		.unwrap(),
+		..Default::default()
+	}
+	.assimilate_storage(&mut t)
+	.unwrap();
+
+	let mut ext: sp_io::TestExternalities = t.into();
+
+	ext.execute_with(|| {
+		System::set_block_number(1);
+		let res = CurrentSchemaIdentifierMaximum::<Test>::get();
+
+		// We should have at least 10
+		assert!(res >= 10);
+
+		// Check that the first schema exists
+		let res = SchemasPallet::get_schema_by_id(1);
+		assert!(res.is_some());
+	});
 }

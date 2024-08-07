@@ -16,21 +16,32 @@
 	rustdoc::invalid_codeblock_attributes,
 	missing_docs
 )]
-
 use common_primitives::utils::wrap_binary_data;
+use common_runtime::extensions::check_nonce::CheckNonce;
 use frame_support::{
 	dispatch::{DispatchInfo, GetDispatchInfo, PostDispatchInfo},
 	pallet_prelude::*,
 	traits::Contains,
 };
 use frame_system::pallet_prelude::*;
+use pallet_transaction_payment::OnChargeTransaction;
 use sp_runtime::{
-	traits::{Convert, Dispatchable, SignedExtension, Verify},
+	generic::Era,
+	traits::{Convert, Dispatchable, SignedExtension, Verify, Zero},
+	transaction_validity::{TransactionValidity, TransactionValidityError},
 	AccountId32, MultiSignature,
 };
 use sp_std::{vec, vec::Vec};
 
-use common_runtime::extensions::check_nonce::CheckNonce;
+/// Type aliases used for interaction with `OnChargeTransaction`.
+pub(crate) type OnChargeTransactionOf<T> =
+	<T as pallet_transaction_payment::Config>::OnChargeTransaction;
+
+/// Balance type alias.
+pub(crate) type BalanceOf<T> = <OnChargeTransactionOf<T> as OnChargeTransaction<T>>::Balance;
+
+#[cfg(any(feature = "runtime-benchmarks", test))]
+mod test_common;
 
 #[cfg(test)]
 mod mock;
@@ -39,6 +50,10 @@ mod tests;
 
 pub mod weights;
 pub use weights::*;
+
+#[cfg(feature = "runtime-benchmarks")]
+use frame_support::traits::tokens::fungible::Mutate;
+use frame_system::CheckWeight;
 
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
@@ -58,7 +73,9 @@ pub mod module {
 	pub const STORAGE_VERSION: StorageVersion = StorageVersion::new(0);
 
 	#[pallet::config]
-	pub trait Config: frame_system::Config {
+	pub trait Config:
+		frame_system::Config + pallet_transaction_payment::Config + Send + Sync
+	{
 		/// The overarching event type.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
@@ -67,7 +84,8 @@ pub mod module {
 			+ Dispatchable<RuntimeOrigin = Self::RuntimeOrigin, PostInfo = PostDispatchInfo>
 			+ GetDispatchInfo
 			+ From<frame_system::Call<Self>>
-			+ IsType<<Self as frame_system::Config>::RuntimeCall>;
+			+ IsType<<Self as frame_system::Config>::RuntimeCall>
+			+ From<Call<Self>>;
 
 		/// Weight information for extrinsics in this pallet.
 		type WeightInfo: WeightInfo;
@@ -77,6 +95,10 @@ pub mod module {
 
 		/// Filters the inner calls for passkey which is set in runtime
 		type PasskeyCallFilter: Contains<<Self as Config>::RuntimeCall>;
+
+		/// Helper Currency method for benchmarking
+		#[cfg(feature = "runtime-benchmarks")]
+		type Currency: Mutate<Self::AccountId>;
 	}
 
 	#[pallet::error]
@@ -101,7 +123,9 @@ pub mod module {
 
 	#[pallet::call]
 	impl<T: Config> Pallet<T> {
-		/// proxy call
+		/// Proxies an extrinsic call by changing the origin to `account_id` inside the payload.
+		/// Since this is an unsigned extrinsic all the verification checks are performed inside
+		/// `validate_unsigned` and `pre_dispatch` hooks.
 		#[pallet::call_index(0)]
 		#[pallet::weight({
 			let dispatch_info = payload.passkey_call.call.get_dispatch_info();
@@ -119,7 +143,8 @@ pub mod module {
 				transaction_account_id.clone(),
 			));
 			let result = payload.passkey_call.call.dispatch(main_origin);
-			if result.is_ok() {
+			if let Ok(_inner) = result {
+				// all post-dispatch logic should be included in here
 				Self::deposit_event(Event::TransactionExecutionSuccess {
 					account_id: transaction_account_id,
 				});
@@ -131,28 +156,63 @@ pub mod module {
 	#[pallet::validate_unsigned]
 	impl<T: Config> ValidateUnsigned for Pallet<T>
 	where
-		<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo>,
+		BalanceOf<T>: Send + Sync + From<u64>,
+		<T as frame_system::Config>::RuntimeCall:
+			From<Call<T>> + Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 	{
 		type Call = Call<T>;
-		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
-			let payload = Self::filter_valid_calls(&call)?;
-			Self::validate_signatures(&payload)?;
 
-			let nonce_check = PasskeyNonce::new(payload.passkey_call.clone());
-			nonce_check.validate()
+		/// Validating the regular checks of an extrinsic plus verifying the P256 Passkey signature
+		/// The majority of these checks are the same as `SignedExtra` list in defined in runtime
+		fn validate_unsigned(_source: TransactionSource, call: &Self::Call) -> TransactionValidity {
+			let valid_tx = ValidTransaction::default();
+			let payload = Self::filter_valid_calls(&call)?;
+
+			let frame_system_validity =
+				FrameSystemChecks(payload.passkey_call.account_id.clone(), call.clone())
+					.validate()?;
+			let nonce_validity = PasskeyNonceCheck::new(payload.passkey_call.clone()).validate()?;
+			let weight_validity = PasskeyWeightCheck::new(call.clone()).validate()?;
+			let tx_payment_validity = ChargeTransactionPayment::<T>(
+				payload.passkey_call.account_id.clone(),
+				call.clone(),
+			)
+			.validate()?;
+			// this is the last since it is the heaviest
+			let signature_validity = PasskeySignatureCheck::new(payload.clone()).validate()?;
+
+			let valid_tx = valid_tx
+				.combine_with(frame_system_validity)
+				.combine_with(nonce_validity)
+				.combine_with(weight_validity)
+				.combine_with(tx_payment_validity)
+				.combine_with(signature_validity);
+			Ok(valid_tx)
 		}
 
+		/// Checking and executing a list of operations pre_dispatch
+		/// The majority of these checks are the same as `SignedExtra` list in defined in runtime
 		fn pre_dispatch(call: &Self::Call) -> Result<(), TransactionValidityError> {
-			Self::validate_unsigned(TransactionSource::InBlock, call)?;
-
 			let payload = Self::filter_valid_calls(&call)?;
-			let nonce_check = PasskeyNonce::new(payload.passkey_call.clone());
-			nonce_check.pre_dispatch()
+			FrameSystemChecks(payload.passkey_call.account_id.clone(), call.clone())
+				.pre_dispatch()?;
+			PasskeyNonceCheck::new(payload.passkey_call.clone()).pre_dispatch()?;
+			PasskeyWeightCheck::new(call.clone()).pre_dispatch()?;
+			ChargeTransactionPayment::<T>(payload.passkey_call.account_id.clone(), call.clone())
+				.pre_dispatch()?;
+			// this is the last since it is the heaviest
+			PasskeySignatureCheck::new(payload.clone()).pre_dispatch()
 		}
 	}
 }
 
-impl<T: Config> Pallet<T> {
+impl<T: Config> Pallet<T>
+where
+	BalanceOf<T>: Send + Sync + From<u64>,
+	<T as frame_system::Config>::RuntimeCall:
+		From<Call<T>> + Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
+{
+	/// Filtering the valid calls and extracting the payload from inside the call
 	fn filter_valid_calls(call: &Call<T>) -> Result<PasskeyPayload<T>, TransactionValidityError> {
 		match call {
 			Call::proxy { payload }
@@ -161,15 +221,82 @@ impl<T: Config> Pallet<T> {
 			_ => return Err(InvalidTransaction::Call.into()),
 		}
 	}
+}
 
-	fn validate_signatures(payload: &PasskeyPayload<T>) -> TransactionValidity {
-		let signed_data = payload.passkey_public_key;
-		let signature = payload.passkey_call.account_ownership_proof.clone();
-		let signer = &payload.passkey_call.account_id;
-		match Self::check_account_signature(signer, &signed_data.into(), &signature) {
-			Ok(_) => Ok(ValidTransaction::default()),
-			Err(_e) => InvalidTransaction::BadSigner.into(),
-		}
+/// Passkey specific nonce check which is a wrapper around `CheckNonce` extension
+#[derive(Encode, Decode, Clone, TypeInfo)]
+#[scale_info(skip_type_params(T))]
+struct PasskeyNonceCheck<T: Config>(pub PasskeyCall<T>);
+
+impl<T: Config> PasskeyNonceCheck<T>
+where
+	<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo>,
+{
+	pub fn new(passkey_call: PasskeyCall<T>) -> Self {
+		Self(passkey_call)
+	}
+
+	pub fn validate(&self) -> TransactionValidity {
+		let who = self.0.account_id.clone();
+		let nonce = self.0.account_nonce;
+		let some_call: &<T as Config>::RuntimeCall = &self.0.call;
+		let info = &some_call.get_dispatch_info();
+
+		let passkey_nonce = CheckNonce::<T>::from(nonce);
+		passkey_nonce.validate(&who, &some_call.clone().into(), info, 0usize)
+	}
+
+	pub fn pre_dispatch(&self) -> Result<(), TransactionValidityError> {
+		let who = self.0.account_id.clone();
+		let nonce = self.0.account_nonce;
+		let some_call: &<T as Config>::RuntimeCall = &self.0.call;
+		let info = &some_call.get_dispatch_info();
+
+		let passkey_nonce = CheckNonce::<T>::from(nonce);
+		passkey_nonce.pre_dispatch(&who, &some_call.clone().into(), info, 0usize)
+	}
+}
+
+/// Passkey signatures check which verifies 2 signatures
+/// 1. Account signature of the P256 public key
+/// 2. Passkey P256 signature of the account public key
+#[derive(Encode, Decode, Clone, TypeInfo)]
+#[scale_info(skip_type_params(T))]
+struct PasskeySignatureCheck<T: Config>(pub PasskeyPayload<T>);
+
+impl<T: Config> PasskeySignatureCheck<T> {
+	pub fn new(passkey_payload: PasskeyPayload<T>) -> Self {
+		Self(passkey_payload)
+	}
+
+	pub fn validate(&self) -> TransactionValidity {
+		// checking account signature to verify ownership of the account used
+		let signed_data = self.0.passkey_public_key.clone();
+		let signature = self.0.passkey_call.account_ownership_proof.clone();
+		let signer = &self.0.passkey_call.account_id;
+
+		Self::check_account_signature(signer, &signed_data.inner().to_vec(), &signature)
+			.map_err(|_e| TransactionValidityError::Invalid(InvalidTransaction::BadSigner))?;
+
+		// checking the passkey signature to ensure access to the passkey
+		let p256_signed_data = self.0.passkey_call.encode();
+		let p256_signature = self.0.verifiable_passkey_signature.clone();
+		let p256_signer = self.0.passkey_public_key.clone();
+
+		p256_signature
+			.try_verify(&p256_signed_data, &p256_signer)
+			.map_err(|e| match e {
+				PasskeyVerificationError::InvalidProof =>
+					TransactionValidityError::Invalid(InvalidTransaction::BadSigner),
+				_ => TransactionValidityError::Invalid(InvalidTransaction::Custom(e.into())),
+			})?;
+
+		Ok(ValidTransaction::default())
+	}
+
+	pub fn pre_dispatch(&self) -> Result<(), TransactionValidityError> {
+		let _ = self.validate()?;
+		Ok(())
 	}
 
 	/// Check the signature on passkey public key by the account id
@@ -199,36 +326,140 @@ impl<T: Config> Pallet<T> {
 	}
 }
 
-/// Passkey specific nonce check
+/// Passkey related tx payment
 #[derive(Encode, Decode, Clone, TypeInfo)]
 #[scale_info(skip_type_params(T))]
-struct PasskeyNonce<T: Config>(pub PasskeyCall<T>);
+pub struct ChargeTransactionPayment<T: Config>(pub T::AccountId, pub Call<T>);
 
-impl<T: Config> PasskeyNonce<T>
+impl<T: Config> ChargeTransactionPayment<T>
 where
-	<T as frame_system::Config>::RuntimeCall: Dispatchable<Info = DispatchInfo>,
+	BalanceOf<T>: Send + Sync + From<u64>,
+	<T as frame_system::Config>::RuntimeCall:
+		From<Call<T>> + Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
 {
-	pub fn new(passkey_call: PasskeyCall<T>) -> Self {
-		Self(passkey_call)
-	}
-
-	pub fn validate(&self) -> TransactionValidity {
-		let who = self.0.account_id.clone();
-		let nonce = self.0.account_nonce;
-		let some_call: &<T as Config>::RuntimeCall = &self.0.call;
-		let info = &some_call.get_dispatch_info();
-
-		let passkey_nonce = CheckNonce::<T>::from(nonce);
-		passkey_nonce.validate(&who, &some_call.clone().into(), info, 0usize)
-	}
-
+	/// Validates the transaction fee paid with tokens.
 	pub fn pre_dispatch(&self) -> Result<(), TransactionValidityError> {
-		let who = self.0.account_id.clone();
-		let nonce = self.0.account_nonce;
-		let some_call: &<T as Config>::RuntimeCall = &self.0.call;
-		let info = &some_call.get_dispatch_info();
+		let info = &self.1.get_dispatch_info();
+		let len = self.1.using_encoded(|c| c.len());
+		let runtime_call: <T as frame_system::Config>::RuntimeCall =
+			<T as frame_system::Config>::RuntimeCall::from(self.1.clone());
+		let who = self.0.clone();
+		pallet_transaction_payment::ChargeTransactionPayment::<T>::from(Zero::zero())
+			.pre_dispatch(&who, &runtime_call, info, len)?;
+		Ok(())
+	}
 
-		let passkey_nonce = CheckNonce::<T>::from(nonce);
-		passkey_nonce.pre_dispatch(&who, &some_call.clone().into(), info, 0usize)
+	/// Validates the transaction fee paid with tokens.
+	pub fn validate(&self) -> TransactionValidity {
+		let info = &self.1.get_dispatch_info();
+		let len = self.1.using_encoded(|c| c.len());
+		let runtime_call: <T as frame_system::Config>::RuntimeCall =
+			<T as frame_system::Config>::RuntimeCall::from(self.1.clone());
+		let who = self.0.clone();
+
+		pallet_transaction_payment::ChargeTransactionPayment::<T>::from(Zero::zero()).validate(
+			&who,
+			&runtime_call,
+			info,
+			len,
+		)
+	}
+}
+
+/// Frame system related checks
+#[derive(Encode, Decode, Clone, TypeInfo)]
+#[scale_info(skip_type_params(T))]
+pub struct FrameSystemChecks<T: Config + Send + Sync>(pub T::AccountId, pub Call<T>);
+
+impl<T: Config + Send + Sync> FrameSystemChecks<T>
+where
+	<T as frame_system::Config>::RuntimeCall:
+		From<Call<T>> + Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
+{
+	/// Validates the transaction fee paid with tokens.
+	pub fn pre_dispatch(&self) -> Result<(), TransactionValidityError> {
+		let info = &self.1.get_dispatch_info();
+		let len = self.1.using_encoded(|c| c.len());
+		let runtime_call: <T as frame_system::Config>::RuntimeCall =
+			<T as frame_system::Config>::RuntimeCall::from(self.1.clone());
+		let who = self.0.clone();
+
+		let non_zero_sender_check = frame_system::CheckNonZeroSender::<T>::new();
+		let spec_version_check = frame_system::CheckSpecVersion::<T>::new();
+		let tx_version_check = frame_system::CheckTxVersion::<T>::new();
+		let genesis_hash_check = frame_system::CheckGenesis::<T>::new();
+		let era_check = frame_system::CheckEra::<T>::from(Era::immortal());
+
+		non_zero_sender_check.pre_dispatch(&who, &runtime_call, info, len)?;
+		spec_version_check.pre_dispatch(&who, &runtime_call, info, len)?;
+		tx_version_check.pre_dispatch(&who, &runtime_call, info, len)?;
+		genesis_hash_check.pre_dispatch(&who, &runtime_call, info, len)?;
+		era_check.pre_dispatch(&who, &runtime_call, info, len)
+	}
+
+	/// Validates the transaction fee paid with tokens.
+	pub fn validate(&self) -> TransactionValidity {
+		let info = &self.1.get_dispatch_info();
+		let len = self.1.using_encoded(|c| c.len());
+		let runtime_call: <T as frame_system::Config>::RuntimeCall =
+			<T as frame_system::Config>::RuntimeCall::from(self.1.clone());
+		let who = self.0.clone();
+
+		let non_zero_sender_check = frame_system::CheckNonZeroSender::<T>::new();
+		let spec_version_check = frame_system::CheckSpecVersion::<T>::new();
+		let tx_version_check = frame_system::CheckTxVersion::<T>::new();
+		let genesis_hash_check = frame_system::CheckGenesis::<T>::new();
+		let era_check = frame_system::CheckEra::<T>::from(Era::immortal());
+
+		let non_zero_sender_validity =
+			non_zero_sender_check.validate(&who, &runtime_call, info, len)?;
+		let spec_version_validity = spec_version_check.validate(&who, &runtime_call, info, len)?;
+		let tx_version_validity = tx_version_check.validate(&who, &runtime_call, info, len)?;
+		let genesis_hash_validity = genesis_hash_check.validate(&who, &runtime_call, info, len)?;
+		let era_validity = era_check.validate(&who, &runtime_call, info, len)?;
+
+		Ok(non_zero_sender_validity
+			.combine_with(spec_version_validity)
+			.combine_with(tx_version_validity)
+			.combine_with(genesis_hash_validity)
+			.combine_with(era_validity))
+	}
+}
+
+/// Block resource (weight) limit check.
+#[derive(Encode, Decode, Clone, TypeInfo)]
+#[scale_info(skip_type_params(T))]
+pub struct PasskeyWeightCheck<T: Config>(pub Call<T>);
+
+impl<T: Config> PasskeyWeightCheck<T>
+where
+	<T as frame_system::Config>::RuntimeCall:
+		From<Call<T>> + Dispatchable<Info = DispatchInfo, PostInfo = PostDispatchInfo>,
+{
+	/// creating a new instance
+	pub fn new(call: Call<T>) -> Self {
+		Self(call)
+	}
+
+	/// Validate the transaction
+	pub fn validate(&self) -> TransactionValidity {
+		let len = self.0.encode().len();
+
+		CheckWeight::<T>::validate_unsigned(
+			&self.0.clone().into(),
+			&self.0.get_dispatch_info(),
+			len,
+		)
+	}
+
+	/// Pre-dispatch transaction checks
+	pub fn pre_dispatch(&self) -> Result<(), TransactionValidityError> {
+		let len = self.0.encode().len();
+
+		CheckWeight::<T>::pre_dispatch_unsigned(
+			&self.0.clone().into(),
+			&self.0.get_dispatch_info(),
+			len,
+		)
 	}
 }
